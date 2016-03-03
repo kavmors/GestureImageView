@@ -3,25 +3,22 @@ package com.kavmors.view.widget;
 import android.annotation.TargetApi;
 import android.content.Context;
 import android.content.res.TypedArray;
-import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.PointF;
 import android.graphics.drawable.Drawable;
-import android.net.Uri;
 import android.os.Build.VERSION;
 import android.os.Build.VERSION_CODES;
 import android.os.Handler;
 import android.os.Message;
 import android.util.AttributeSet;
-import android.util.Log;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.OverScroller;
 import android.widget.Scroller;
 
 public class GestureImageView extends ImageView {
-	private static final String TAG = "GestureImageView";
+//	private static final String TAG = "GestureImageView";
 	
 	public static final int NO_LIMIT = 4;
 	public static final int LIMIT = 2;
@@ -104,15 +101,16 @@ public class GestureImageView extends ImageView {
 	
 	public GestureImageView(Context context, AttributeSet attrs) {
 		super(context, attrs);
+		obtainAttributes(context, attrs);
 		privateConstructor(context);
 	}
 	
 	public GestureImageView(Context context, AttributeSet attrs, int defStyle) {
 		super(context, attrs, defStyle);
+		obtainAttributes(context, attrs);
 		privateConstructor(context);
 	}
 	
-	//TODO: scaleType by attrs
 	private void privateConstructor(Context context) {
 		mMatrix.set(getImageMatrix());
 		setBackgroundColor(Color.BLACK);
@@ -121,13 +119,16 @@ public class GestureImageView extends ImageView {
 		setClickable(true);
 	}
 	
-//	private void obtainScaleType(Context context, AttributeSet attrs) {
-//		TypedArray ta = context.obtainStyledAttributes(attrs, android.R.attr.scaleType);
-//	}
+	private void obtainAttributes(Context context, AttributeSet attrs) {
+		int[] styleable = new int[]{android.R.attr.scaleType};
+		TypedArray a = context.obtainStyledAttributes(attrs, styleable);
+		int index = a.getInteger(0, ScaleType.CENTER.ordinal());
+		mScaleType = ScaleType.values()[index];
+		a.recycle();
+	}
 	
 	@Override
 	protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-		Log.i(TAG, "onMeasure");
 		Drawable drawable = getDrawable();
 		if (drawable!=null) {
 			mImgHeight = drawable.getIntrinsicHeight();

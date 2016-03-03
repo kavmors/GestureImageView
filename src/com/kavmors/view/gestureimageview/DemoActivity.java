@@ -6,7 +6,6 @@ import android.app.Activity;
 import android.os.Bundle;
 import android.view.View;
 import android.view.View.OnClickListener;
-import android.widget.ImageView.ScaleType;
 
 public class DemoActivity extends Activity implements OnClickListener {
 	private int[] images = {R.drawable.cat, R.drawable.dog};
@@ -42,7 +41,6 @@ public class DemoActivity extends Activity implements OnClickListener {
 		zoomin.setOnClickListener(this);
 		zoomout.setOnClickListener(this);
 		v.setOnClickListener(this);
-		v.setScaleType(ScaleType.FIT_XY);
 	}
 
 	@Override
