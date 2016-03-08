@@ -27,10 +27,10 @@ public class GestureImageView extends ImageView {
 	//State that decide whether the view can transform over limit
 	//UNABLE: when it reach limit, it cannot react event that will make it over limit
 	//OVER: do nothing when it goes over limit
-	//RETURN: when it goes over limit, the view will return to the last state by animation 
-	private enum OverlimitFlag {UNABLE, OVER, RETURN};
-	private OverlimitFlag mCanZoomOverLimit = OverlimitFlag.RETURN;
-	private OverlimitFlag mCanDragOverLimit = OverlimitFlag.RETURN;
+	//SPRING_BACK: when it goes over limit, the view will spring back to the last state by animation 
+	private enum OverlimitFlag {UNABLE, OVER, SPRING_BACK};
+	private OverlimitFlag mCanZoomOverLimit = OverlimitFlag.SPRING_BACK;
+	private OverlimitFlag mCanDragOverLimit = OverlimitFlag.SPRING_BACK;
 	
 	private Matrix mMatrix = new Matrix();
 	private ScaleType mScaleType = ScaleType.CENTER;
@@ -526,7 +526,7 @@ public class GestureImageView extends ImageView {
 		if (canZoom) {
 			mCanZoomOverLimit = OverlimitFlag.OVER;
 		} else {
-			mCanZoomOverLimit = springBack? OverlimitFlag.RETURN: OverlimitFlag.UNABLE;
+			mCanZoomOverLimit = springBack? OverlimitFlag.SPRING_BACK: OverlimitFlag.UNABLE;
 		}
 	}
 	
@@ -570,7 +570,7 @@ public class GestureImageView extends ImageView {
 		if (canDrag) {
 			mCanDragOverLimit = OverlimitFlag.OVER;
 		} else {
-			mCanDragOverLimit = springBack? OverlimitFlag.RETURN: OverlimitFlag.UNABLE;
+			mCanDragOverLimit = springBack? OverlimitFlag.SPRING_BACK: OverlimitFlag.UNABLE;
 		}
 	}
 	
@@ -812,7 +812,7 @@ public class GestureImageView extends ImageView {
 	private void afterDragByUser(int movedX, int movedY) {
 		if (mCanDragOverLimit==OverlimitFlag.OVER) {
 			safeCallAfterDrag(true, movedX, movedY);
-		} else if (mCanDragOverLimit==OverlimitFlag.RETURN) {
+		} else if (mCanDragOverLimit==OverlimitFlag.SPRING_BACK) {
 			int fixX = 0, fixY = 0;
 			if (getImageWidth() > getWidth()) {
 				if (movedX > 0 && getImageLeft() > 0) {
@@ -868,7 +868,7 @@ public class GestureImageView extends ImageView {
 	private void afterZoomByUser(PointF center, float scaled) {
 		if (mCanZoomOverLimit==OverlimitFlag.OVER) {
 			safeCallAfterZoom(true, center, scaled);
-		} else if (mCanZoomOverLimit==OverlimitFlag.RETURN) {
+		} else if (mCanZoomOverLimit==OverlimitFlag.SPRING_BACK) {
 			float fixScale = 1;
 			//OverLimited
 			if (mMinScale>0 && getImageScale()<mMinScale) {
