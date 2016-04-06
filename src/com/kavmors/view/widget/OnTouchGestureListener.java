@@ -13,11 +13,11 @@ import android.view.View.OnTouchListener;
 import android.view.ViewConfiguration;
 
 /**
- * Implement of {@link View.OnTouchListener} that can detect more events after a touch of singleTap, doubleTap and multiTap. 
+ * Implement of {@link OnTouchListener} that can detect more events after a touch of singleTap, doubleTap and multiTap.
  * @author KavMors
  *
  */
-public class OnTouchGestureListener implements View.OnTouchListener {
+public class OnTouchGestureListener implements OnTouchListener {
 	public static final String TAG = "OnTouchGestureListener";
 	
 	private static final int LONGPRESS_TIMEOUT = ViewConfiguration.getLongPressTimeout();
@@ -31,7 +31,7 @@ public class OnTouchGestureListener implements View.OnTouchListener {
     private boolean mMultiLongClickable = true;
     private OnTouchListener mUserTouchListener = null;
 	
-	private enum Mode { NONE, DOWN, MOVE, UP, DBL_DOWN, DBL_MOVE, DBL_UP, MULTI_DOWN, MULTI_MOVE, MULTI_UP};
+	private enum Mode { NONE, DOWN, MOVE, UP, DBL_DOWN, DBL_MOVE, DBL_UP, MULTI_DOWN, MULTI_MOVE, MULTI_UP}
 	private Mode mMode = Mode.NONE;
 	
 	private OnDetectSingle mOnSingle = defaultOnDetectSingle();
@@ -42,38 +42,38 @@ public class OnTouchGestureListener implements View.OnTouchListener {
 	 * Detect single tap events
 	 */
 	public interface OnDetectSingle {
-		public void onDown(PointF point);
-		public void onMove(PointF from, PointF to, float dx, float dy);
-		public void onFling(PointF from, PointF to, float vx, float vy);
-		public void onUp(PointF point);
-		public void onClick(PointF point);
-		public void onLongClick(PointF point);
+		void onDown(PointF point);
+		void onMove(PointF from, PointF to, float dx, float dy);
+		void onFling(PointF from, PointF to, float vx, float vy);
+		void onUp(PointF point);
+		void onClick(PointF point);
+		void onLongClick(PointF point);
 	}
 	
 	/**
 	 * Detect double tap events
 	 */
 	public interface OnDetectDouble {
-		public void onDblDown(PointF point);
-		public void onDblMove(PointF from, PointF to, float dx, float dy);
-		public void onDblUp(PointF point);
-		public void onDblClick(PointF point);
-		public void onDblLongClick(PointF point);
+		void onDblDown(PointF point);
+		void onDblMove(PointF from, PointF to, float dx, float dy);
+		void onDblUp(PointF point);
+		void onDblClick(PointF point);
+		void onDblLongClick(PointF point);
 	}
 	
 	/**
 	 * Detect multi-pointer events
 	 */
 	public interface OnDetectMulti {
-		public void onMultiDown(PointF p0, PointF p1);
-		public void onMultiMove(PointF oldPoint0, PointF oldPoint1, PointF newPoint0, PointF newPoint1);
-		public void onMultiUp(PointF p0, PointF p1);
-		public void onMultiClick(PointF p0, PointF p1);
-		public void onMultiLongClick(PointF p0, PointF p1);
+		void onMultiDown(PointF p0, PointF p1);
+		void onMultiMove(PointF oldPoint0, PointF oldPoint1, PointF newPoint0, PointF newPoint1);
+		void onMultiUp(PointF p0, PointF p1);
+		void onMultiClick(PointF p0, PointF p1);
+		void onMultiLongClick(PointF p0, PointF p1);
 	}
 	
 	/**
-	 * Creates a new Listener with the supplied {@link android.os.Handler}
+	 * Creates a new Listener with the supplied {@link Handler}
 	 * @param context The application's context
 	 */
 	public OnTouchGestureListener(Context context) {
@@ -118,7 +118,7 @@ public class OnTouchGestureListener implements View.OnTouchListener {
 
 	/**
 	 * Enables or disables double-tap long click events for this listener.
-	 * @param longClickable True to make it double-tap long clickable, false otherwise
+	 * @param dblLongClickable True to make it double-tap long clickable, false otherwise
 	 */
 	public void setDblLongClickable(boolean dblLongClickable) {
 		mDblLongClickable = dblLongClickable;
@@ -126,7 +126,7 @@ public class OnTouchGestureListener implements View.OnTouchListener {
 
 	/**
 	 * Enables or disables multi-tap long click events for this listener.
-	 * @param longClickable True to make it multi-tap long clickable, false otherwise
+	 * @param multiLongClickable True to make it multi-tap long clickable, false otherwise
 	 */
 	public void setMultiLongClickable(boolean multiLongClickable) {
 		mMultiLongClickable = multiLongClickable;
@@ -143,9 +143,7 @@ public class OnTouchGestureListener implements View.OnTouchListener {
 	@Override
 	public boolean onTouch(View v, MotionEvent event) {
 		if (event.getPointerCount() < 2) {
-			if (mSingleDetector.onTouchEvent(event)) {
-				return true;
-			} else {
+			if (!mSingleDetector.onTouchEvent(event)) {
 				mSingleDetectorGesture.continueEvent(event);
 			}
 		} else {
@@ -160,8 +158,8 @@ public class OnTouchGestureListener implements View.OnTouchListener {
 	public static class Util {
 		/**
 		 * Calculate the distance of two points.
-		 * @param p0
-		 * @param p1
+		 * @param p0 the first point
+		 * @param p1 the second point
 		 * @return Distance in float
 		 */
 		public static float distance(PointF p0, PointF p1) {
@@ -172,8 +170,8 @@ public class OnTouchGestureListener implements View.OnTouchListener {
 		
 		/**
 		 * Calculate the center point of two points.
-		 * @param p0
-		 * @param p1
+		 * @param p0 the first point
+		 * @param p1 the second point
 		 * @return Coordinate of center point in PointF
 		 */
 		public static PointF center(PointF p0, PointF p1) {

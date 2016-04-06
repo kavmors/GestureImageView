@@ -3,7 +3,6 @@ package com.kavmors.view.widget;
 import android.annotation.TargetApi;
 import android.content.Context;
 import android.content.res.TypedArray;
-import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.PointF;
 import android.graphics.drawable.Drawable;
@@ -12,14 +11,20 @@ import android.os.Build.VERSION_CODES;
 import android.os.Handler;
 import android.os.Message;
 import android.util.AttributeSet;
+import android.util.Log;
 import android.view.View;
 import android.widget.ImageView;
 import android.widget.OverScroller;
 import android.widget.Scroller;
 
+/**
+ * An ImageView that supports translate and zoom by user gesture.
+ */
 public class GestureImageView extends ImageView {
-//	private static final String TAG = "GestureImageView";
-	
+//	Last modify: 2016-03-22
+
+	private static final String TAG = "GestureImageView";
+
 	public static final int NO_LIMIT = 4;
 	public static final int LIMIT = 2;
 	public static final int SPRING_BACK = 1;
@@ -28,47 +33,65 @@ public class GestureImageView extends ImageView {
 	//UNABLE: when it reach limit, it cannot react event that will make it over limit
 	//OVER: do nothing when it goes over limit
 	//SPRING_BACK: when it goes over limit, the view will spring back to the last state by animation 
-	private enum OverlimitFlag {UNABLE, OVER, SPRING_BACK};
+	private enum OverlimitFlag {UNABLE, OVER, SPRING_BACK}
+
 	private OverlimitFlag mCanZoomOverLimit = OverlimitFlag.SPRING_BACK;
 	private OverlimitFlag mCanDragOverLimit = OverlimitFlag.SPRING_BACK;
-	
+
 	private Matrix mMatrix = new Matrix();
 	private ScaleType mScaleType = ScaleType.CENTER;
-	
+
 	private OnDoubleClickListener mDblListener;
-	private View.OnLongClickListener mLongListener;
-	private OnZoomListener mZoomListener;
-	private OnDragListener mDragListener;
+	private OnLongClickListener mLongListener;
+	private OnZoomListener mZoomListener = emptyZoomListener;
+	private OnDragListener mDragListener = emptyDragListener;
 
 	private boolean mQuickZoomable = true;
 	private boolean mLongClickable = true;
 	private boolean mDblClickable = true;
 	private boolean mZoomable = true;
 	private boolean mDraggable = true;
-	
+
 	private Matrix mMatrixOrigin;			//Matrix that set after setScaleType
 	private int mImgHeight, mImgWidth;
 	private float mMinScale = 1f/2f, mMaxScale = 2f;
-	
+	private int mExtendLimitTop = 0, mExtendLimitLeft = 0, mExtendLimitBottom = 0, mExtendLimitRight = 0;
+
 	private Handler mHandler;
 	private Message mMsg;
 	private static final int MSG_AFTER_DRAG = 2;
-	
+
 	private static final float DEFAULT_ZOOM_SCALE = 1.5f;
 	private static final long ANIMATE_DURATION = 500;
 	private static final float SLIDE_ZOOM_WEIGHT = 192f;		//weight in slide zooming
 	private static final float SCALE_ZOOM_WEIGHT = 480f;		//weight in scale zooming
-	
+
+	/**
+	 * A interface of callback in double-click event.
+	 */
 	public interface OnDoubleClickListener {
-		public void onDoubleClick(View view);
+		void onDoubleClick(View view);
 	}
-	
+
+	/**
+	 * A interface of callback in zoom event.
+	 */
 	public interface OnZoomListener {
 		/**
 		 * Call when a zoom event start.
 		 * @param byGesture True if the event is created by user gesture
 		 * */
-		public void onZoomStart(boolean byGesture);
+		void onZoomStart(boolean byGesture);
+
+		/**
+		 * Call when a zoom event happening.
+		 * @param byGesture True if the event is created by user gesture
+		 * @param step The scale that has been zoom of last step
+		 * @param centerX The pointX of center point of the last zoom
+		 * @param centerY The pointY of center point of the last zoom
+		 */
+		void onZooming(boolean byGesture, float step, int centerX, int centerY);
+
 		/**
 		 * Call after a zoom event.
 		 * @param byGesture True if the event is created by user gesture
@@ -76,48 +99,60 @@ public class GestureImageView extends ImageView {
 		 * @param centerX The pointX of center point of the last zoom
 		 * @param centerY The pointY of center point of the last zoom
 		 */
-		public void onZoomEnd(boolean byGesture, float scale, int centerX, int centerY);
-		
+		void onZoomEnd(boolean byGesture, float scale, int centerX, int centerY);
 	}
+
+	/**
+	 * A interface of callback in drag event.
+	 */
 	public interface OnDragListener {
 		/**
 		 * Call when a drag event start.
 		 * @param byGesture True if the event is created by user gesture
 		 * */
-		public void onDragStart(boolean byGesture);
+		void onDragStart(boolean byGesture);
+
+		/**
+		 * Call when a drag event happening.
+		 * @param byGesture True if the event is created by user gesture
+		 * @param stepX The distance along the X axis that has been scrolled of the last step
+		 * @param stepY The distance along the Y axis that has been scrolled of the last step
+		 */
+		void onDragging(boolean byGesture, int stepX, int stepY);
+
 		/**
 		 * Call after a drag event.
 		 * @param byGesture True if the event is created by user gesture
 		 * @param dx The distance along the X axis that has been scrolled of the last event
 		 * @param dy The distance along the Y axis that has been scrolled of the last event
 		 */
-		public void onDragEnd(boolean byGesture, int dx, int dy);
+		void onDragEnd(boolean byGesture, int dx, int dy);
 	}
-	
+
 	public GestureImageView(Context context) {
 		super(context);
-		privateConstructor(context);
+		privateConstructor();
 	}
-	
+
 	public GestureImageView(Context context, AttributeSet attrs) {
 		super(context, attrs);
 		obtainAttributes(context, attrs);
-		privateConstructor(context);
+		privateConstructor();
 	}
-	
+
 	public GestureImageView(Context context, AttributeSet attrs, int defStyle) {
 		super(context, attrs, defStyle);
 		obtainAttributes(context, attrs);
-		privateConstructor(context);
+		privateConstructor();
 	}
-	
-	private void privateConstructor(Context context) {
+
+	private void privateConstructor() {
 		mMatrix.set(getImageMatrix());
 		super.setScaleType(ScaleType.MATRIX);
 		super.setLongClickable(false);		//Mask View.LongClick
 		setClickable(true);
 	}
-	
+
 	private void obtainAttributes(Context context, AttributeSet attrs) {
 		int[] styleable = new int[]{android.R.attr.scaleType};
 		TypedArray a = context.obtainStyledAttributes(attrs, styleable);
@@ -125,7 +160,7 @@ public class GestureImageView extends ImageView {
 		mScaleType = ScaleType.values()[index];
 		a.recycle();
 	}
-	
+
 	@Override
 	protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
 		Drawable drawable = getDrawable();
@@ -137,7 +172,7 @@ public class GestureImageView extends ImageView {
 		super.setOnTouchListener(mOnTouchListener);
 		super.onMeasure(widthMeasureSpec, heightMeasureSpec);
 	}
-	
+
 	/**
 	 * Set a value to enable or disable a quick zoom gesture(a double-click to zoom in and a multi-click to zoom out). 
 	 * @param quickZoomable True for enable the gesture, false otherwise
@@ -145,7 +180,7 @@ public class GestureImageView extends ImageView {
 	public void setQuickZoomable(boolean quickZoomable) {
 		mQuickZoomable = quickZoomable;
 	}
-	
+
 	/**
 	 * Return whether a quick zoom gesture(a double-click to zoom in and a multi-click to zoom out) is supported. 
 	 * @return If the gesture is supported, return true
@@ -153,7 +188,7 @@ public class GestureImageView extends ImageView {
 	public boolean isQuickZoomable() {
 		return mQuickZoomable;
 	}
-	
+
 	@Override
 	public boolean performClick() {
 		return super.performClick();
@@ -163,22 +198,19 @@ public class GestureImageView extends ImageView {
 	public boolean isLongClickable() {
 		return mLongClickable;
 	}
-	
+
 	@Override
 	public void setLongClickable(boolean longClickable) {
 		mLongClickable = longClickable;
 	}
-	
+
 	@Override
 	public boolean performLongClick() {
-		if (mLongListener!=null) {
-			return mLongListener.onLongClick(this);
-		}
-		return false;
+		return mLongListener!=null && mLongListener.onLongClick(this);
 	}
-	
+
 	@Override
-	public void setOnLongClickListener(View.OnLongClickListener listener) {
+	public void setOnLongClickListener(OnLongClickListener listener) {
 		if (!isLongClickable()) {
 			setLongClickable(true);
 		}
@@ -192,7 +224,7 @@ public class GestureImageView extends ImageView {
 	public boolean isDoubleClickable() {
 		return mDblClickable;
 	}
-	
+
 	/**
 	 * Enables or disables double click events for this view.
 	 * @param dblClickable True to make the view long double clickable, false otherwise
@@ -200,7 +232,7 @@ public class GestureImageView extends ImageView {
 	public void setDoubleClickable(boolean dblClickable) {
 		mDblClickable = dblClickable;
 	}
-	
+
 	/**
 	 * Call this view's OnDoubleClickListener if it is defined.
 	 * @return True if OnDoubleClickListener is called, false otherwise
@@ -212,7 +244,7 @@ public class GestureImageView extends ImageView {
 		}
 		return false;
 	}
-	
+
 	/**
 	 * 	Register a callback to be invoked when this view is double clicked and held. If this view is not double clickable, it becomes double clickable.
 	 *	@param listener The callback that will run when this view is double clicked
@@ -223,7 +255,7 @@ public class GestureImageView extends ImageView {
 		}
 		mDblListener = listener;
 	}
-	
+
 	/**
 	 * Indicates whether this view reacts to zoom events or not.
 	 * @return True if the view is draggable, false otherwise
@@ -231,7 +263,7 @@ public class GestureImageView extends ImageView {
 	public boolean isDraggable() {
 		return mDraggable;
 	}
-	
+
 	/**
 	 * Indicates whether this view reacts to zoom events or not.
 	 * @return True if the view is zoomable, false otherwise
@@ -242,12 +274,12 @@ public class GestureImageView extends ImageView {
 
 	/**
 	 * Enables or disables zoom events for this view.
-	 * @param zoomable True to make this view draggable, false otherwise
+	 * @param draggable True to make this view draggable, false otherwise
 	 */
 	public void setDraggable(boolean draggable) {
 		mDraggable = draggable;
 	}
-	
+
 	/**
 	 * Enables or disables zoom events for this view.
 	 * @param zoomable True to make this view zoomable, false otherwise
@@ -255,7 +287,7 @@ public class GestureImageView extends ImageView {
 	public void setZoomable(boolean zoomable) {
 		mZoomable = zoomable;
 	}
-	
+
 	/**
 	 * Perform a drag event, and will call {@link OnDragListener#onDragEnd} if it is moved.
 	 * @param dx The distance of X axis that should be translate
@@ -263,20 +295,16 @@ public class GestureImageView extends ImageView {
 	 * @return True if this event has been performed, false otherwise
 	 */
 	public boolean performDrag(int dx, int dy) {
-		if (mDragListener!=null) {
-			mDragListener.onDragStart(false);
-		}
+		mDragListener.onDragStart(false);
 		return privatePerformDrag(false, dx, dy, true);
 	}
-	
+
 	private boolean privatePerformDrag(boolean byGesture, int dx, int dy, boolean shouldCallback) {
 		int[] realDistance = checkRealDistance(dx, dy);
 		//cannot drag anymore
 		if (realDistance[0]==0 && realDistance[1]==0) {
-			if (mDragListener!=null) {
-				fitTranslate();
-				mDragListener.onDragEnd(byGesture, 0, 0);
-			}
+			fitTranslate();
+			mDragListener.onDragEnd(byGesture, 0, 0);
 			return false;
 		}
 		if (mFling!=null) {
@@ -285,7 +313,7 @@ public class GestureImageView extends ImageView {
 		dragAnimated(byGesture, realDistance[0], realDistance[1], shouldCallback);
 		return true;
 	}
-	
+
 	/**
 	 * Reset drag the initialized state.
 	 */
@@ -295,7 +323,7 @@ public class GestureImageView extends ImageView {
 			performDrag(-trans[0], -trans[1]);
 		}
 	}
-	
+
 	/**
 	 * Perform a zoom event, and will call {@link OnZoomListener#onZoomEnd} if it is zoomed.
 	 * @param scale The scale that should be zoom
@@ -304,37 +332,33 @@ public class GestureImageView extends ImageView {
 	 * @return True if zoom event has been performed, false otherwise(may reach the min or max scale)
 	 */
 	public boolean performZoom(float scale, int centerX, int centerY) {
-		if (mZoomListener!=null) {
-			mZoomListener.onZoomStart(false);
-		}
+		mZoomListener.onZoomStart(false);
 		return privatePerformZoom(false, scale, centerX, centerY, true);
 	}
-	
+
 	//private
 	private boolean privatePerformZoom(boolean byGesture, float scale, int centerX, int centerY, boolean shouldCallback) {
 		float realScale = checkRealScale(scale);
 		//cannot zoom anymore
 		if (realScale==1f) {
-			if (mZoomListener!=null) {
-				fitTranslate();
-				mZoomListener.onZoomEnd(byGesture, 1, centerX, centerY);
-			}
+			fitTranslate();
+			mZoomListener.onZoomEnd(byGesture, 1, centerX, centerY);
 			return false;
 		}
 		zoomAnimated(byGesture, realScale, centerX, centerY, shouldCallback);
 		return true;
 	}
-	
+
 	/**
 	 * Reset scale the initialized state.
 	 */
 	public void resetZoom() {
 		float scaled = getImageScale();
-		if (scaled!=1f) {
-			privatePerformZoom(false, 1f/scaled, getImageLeft(), getImageTop(), false);
+		if (scaled!= 1f) {
+			performZoom(1f / scaled, getImageLeft(), getImageTop());
 		}
 	}
-	
+
 	/**
 	 * Reset scale and translation the initialized state.
 	 */
@@ -353,6 +377,35 @@ public class GestureImageView extends ImageView {
 	}
 
 	/**
+	 * Set image to center of this view by animation, in vertical.
+	 */
+	public void centerInVertical() {
+		int imageCenterY = getImageTop() + getImageHeight() / 2;
+		int viewCenterY = (getTop() + getBottom()) / 2;
+		performDrag(0, viewCenterY - imageCenterY);
+	}
+
+	/**
+	 * Set image to center of this view by animation, in horizontal.
+	 */
+	public void centerInHorizontal() {
+		int imageCenterX = getImageLeft() + getImageWidth() / 2;
+		int viewCenterX = (getLeft() + getRight()) / 2;
+		performDrag(viewCenterX - imageCenterX, 0);
+	}
+
+	/**
+	 * Set image to center of this view by animation.
+	 */
+	public void centerInView() {
+		int imageCenterY = getImageTop() + getImageHeight() / 2;
+		int viewCenterY = (getTop() + getBottom()) / 2;
+		int imageCenterX = getImageLeft() + getImageWidth() / 2;
+		int viewCenterX = (getLeft() + getRight()) / 2;
+		performDrag(viewCenterX - imageCenterX, viewCenterY - imageCenterY);
+	}
+
+	/**
 	 * Register a callback to be invoked when this view is zoomed. 
 	 * If this view is not zoomable, it becomes zoomable.
 	 * @param listener The callback that will run
@@ -361,9 +414,9 @@ public class GestureImageView extends ImageView {
 		if (!isZoomable()) {
 			setZoomable(true);
 		}
-		mZoomListener = listener;
+		mZoomListener = listener == null ? emptyZoomListener : listener;
 	}
-	
+
 	/**
 	 * Register a callback to be invoked when this view is dragged. 
 	 * If this view is not draggable, it becomes draggable.
@@ -371,11 +424,11 @@ public class GestureImageView extends ImageView {
 	 */
 	public void setOnDragListener(OnDragListener listener) {
 		if (!isDraggable()) {
-			setZoomable(true);
+			setDraggable(true);
 		}
-		mDragListener = listener;
+		mDragListener = listener == null ? emptyDragListener : listener;
 	}
-	
+
 	/**
 	 * Set scale to this ImageView. 
 	 * @param scale The scale that should be set
@@ -392,7 +445,7 @@ public class GestureImageView extends ImageView {
 		setImageMatrix(mMatrix);
 		return true;
 	}
-	
+
 	/**
 	 * Set translate to this ImageView. 
 	 * @param dx The distance of X axis that should be translate
@@ -409,7 +462,7 @@ public class GestureImageView extends ImageView {
 		setImageMatrix(mMatrix);
 		return true;
 	}
-	
+
 	/**
 	 * Indicate whether the image has been zoomed.
 	 * @return If image has been zoomed, return true
@@ -417,7 +470,7 @@ public class GestureImageView extends ImageView {
 	public boolean isZoomed() {
 		return getImageScale()!=1f;
 	}
-	
+
 	/**
 	 * Get the scale value that has been zoomed.
 	 * If the view has not been zoomed, it returns 1
@@ -430,7 +483,7 @@ public class GestureImageView extends ImageView {
 		mMatrixOrigin.getValues(valueOrigin);
 		return valuesCurrent[Matrix.MSCALE_X]/valueOrigin[Matrix.MSCALE_X];
 	}
-	
+
 	/**
 	 * Indicate whether the image has been dragged.
 	 * @return If image has been dragged, return true
@@ -449,7 +502,7 @@ public class GestureImageView extends ImageView {
 		mMatrixOrigin.getValues(values);
 		return getImageLeft() - (int)values[Matrix.MTRANS_X];
 	}
-	
+
 	/**
 	 * Get the value on Y axis that has been translated.
 	 * If the view has not been translate on Y axis, it returns 0
@@ -460,7 +513,7 @@ public class GestureImageView extends ImageView {
 		mMatrixOrigin.getValues(values);
 		return getImageTop() - (int)values[Matrix.MTRANS_Y];
 	}
-	
+
 	/**
 	 * Set minimal value of zooming.
 	 * @param minScale minimal scale
@@ -468,7 +521,7 @@ public class GestureImageView extends ImageView {
 	public void setMinScale(float minScale) {
 		mMinScale = minScale;
 	}
-	
+
 	/**
 	 * Set maximal value of zooming
 	 * @param maxScale maximal scale
@@ -476,10 +529,10 @@ public class GestureImageView extends ImageView {
 	public void setMaxScale(float maxScale) {
 		mMaxScale = maxScale;
 	}
-	
+
 	/**
 	 * Get minimal value of zooming that set by {@link #setMinScale}.
-	 * @param The value
+	 * @return The value
 	 */
 	public float getMinScale() {
 		return mMinScale;
@@ -487,12 +540,26 @@ public class GestureImageView extends ImageView {
 
 	/**
 	 * Get maximal value of zooming that set by {@link #setMaxScale}.
-	 * @param The value
+	 * @return The value
 	 */
 	public float getMaxScale() {
 		return mMaxScale;
 	}
-	
+
+	/**
+	 * Extend border of dragging. Default values are set to 0, which use screen border as dragging border.
+	 * @param top extend value of top in vertical
+	 * @param left extend value of left in horizontal
+	 * @param bottom extend value of bottom in vertical
+	 * @param right extend value of right in horizontal
+	 */
+	public void extendDragLimit(int top, int left, int bottom, int right) {
+		mExtendLimitTop = top;
+		mExtendLimitLeft = left;
+		mExtendLimitBottom = bottom;
+		mExtendLimitRight = right;
+	}
+
 	/**
 	 * Set whether this view can be zoom over max or min scale.
 	 * @param mode zoom mode. Available value includes {@link #NO_LIMIT}, {@link #LIMIT}, {@link #SPRING_BACK}.
@@ -506,21 +573,21 @@ public class GestureImageView extends ImageView {
 		}
 		boolean canZoom = false, springBack = true;
 		switch (mode) {
-		case 2:
-			canZoom = false;
-			springBack = false;
-			break;
-		case 3:
-			canZoom = false;
-			springBack = true;
-			break;
-		case 4:
-		case 5:
-			canZoom = true;
-			springBack = false;
-			break;
-		default:
-			break;
+			case 2:
+				canZoom = false;
+				springBack = false;
+				break;
+			case 3:
+				canZoom = false;
+				springBack = true;
+				break;
+			case 4:
+			case 5:
+				canZoom = true;
+				springBack = false;
+				break;
+			default:
+				break;
 		}
 		if (canZoom) {
 			mCanZoomOverLimit = OverlimitFlag.OVER;
@@ -528,7 +595,7 @@ public class GestureImageView extends ImageView {
 			mCanZoomOverLimit = springBack? OverlimitFlag.SPRING_BACK: OverlimitFlag.UNABLE;
 		}
 	}
-	
+
 	/**
 	 * Returns the value that has been set in the last call of {@link #setZoomMode}.
 	 * @return the value
@@ -536,7 +603,7 @@ public class GestureImageView extends ImageView {
 	public boolean canZoomOverLimit() {
 		return mCanZoomOverLimit == OverlimitFlag.OVER;
 	}
-	
+
 	/**
 	 * Set whether this view can be drag over bound.
 	 * @param mode drag mode. Available value includes {@link #NO_LIMIT}, {@link #LIMIT}, {@link #SPRING_BACK}.
@@ -550,21 +617,21 @@ public class GestureImageView extends ImageView {
 		}
 		boolean canDrag = false, springBack = true;
 		switch (mode) {
-		case 2:
-			canDrag = false;
-			springBack = false;
-			break;
-		case 3:
-			canDrag = false;
-			springBack = true;
-			break;
-		case 4:
-		case 5:
-			canDrag = true;
-			springBack = false;
-			break;
-		default:
-			break;
+			case 2:
+				canDrag = false;
+				springBack = false;
+				break;
+			case 3:
+				canDrag = false;
+				springBack = true;
+				break;
+			case 4:
+			case 5:
+				canDrag = true;
+				springBack = false;
+				break;
+			default:
+				break;
 		}
 		if (canDrag) {
 			mCanDragOverLimit = OverlimitFlag.OVER;
@@ -572,7 +639,7 @@ public class GestureImageView extends ImageView {
 			mCanDragOverLimit = springBack? OverlimitFlag.SPRING_BACK: OverlimitFlag.UNABLE;
 		}
 	}
-	
+
 	/**
 	 * Returns the value that has been set in the last call of {@link #setDragMode}.
 	 * @return the value
@@ -580,17 +647,17 @@ public class GestureImageView extends ImageView {
 	public boolean canDragOverLimit() {
 		return mCanDragOverLimit == OverlimitFlag.OVER;
 	}
-	
+
 	@Override
 	public void setOnTouchListener(OnTouchListener l) {
 		mOnTouchListener.setUserTouchListener(l);
 	}
-	
+
 	@Override
 	public ScaleType getScaleType() {
 		return mScaleType;
 	}
-	
+
 	@Override
 	public void setScaleType(ScaleType type) {
 		mMatrix = new Matrix();
@@ -600,10 +667,10 @@ public class GestureImageView extends ImageView {
 		float vH = this.getHeight();
 		float sW = vW/bW;
 		float sH = vH/bH;
-		
+
 		if (type == null) {
-            throw new NullPointerException("ScaleType cannot be null");
-        }
+			throw new NullPointerException("ScaleType cannot be null");
+		}
 		mScaleType = type;
 		if (type==ScaleType.CENTER) {
 			mMatrix.postTranslate((int)(vW-bW)/2, (int)(vH-bH)/2);
@@ -631,14 +698,12 @@ public class GestureImageView extends ImageView {
 			mMatrix.postScale(scale, scale, 0, 0);
 		} else if (type==ScaleType.FIT_XY) {
 			mMatrix.postScale(sW, sH, 0, 0);
-		} else if (type==ScaleType.MATRIX) {
 		} else {
 			//never
-    		throw new UnsupportedOperationException("Unsupported ScaleType");
+			throw new UnsupportedOperationException("Unsupported ScaleType");
 		}
 		mMatrixOrigin = new Matrix(mMatrix);
 		setImageMatrix(mMatrix);
-		invalidate();
 	}
 
 	/**
@@ -650,7 +715,7 @@ public class GestureImageView extends ImageView {
 		mMatrix.getValues(values);
 		return (int)values[Matrix.MTRANS_Y];
 	}
-	
+
 	/**
 	 * Get the relative position of left border of the image after translated or zoomed, on X axis.
 	 * @return Left border position
@@ -659,9 +724,9 @@ public class GestureImageView extends ImageView {
 		float[] values = new float[9];
 		mMatrix.getValues(values);
 		return (int)values[Matrix.MTRANS_X];
-		
+
 	}
-	
+
 	/**
 	 * Get the relative position of bottom border of the image after translated or zoomed, on Y axis.
 	 * @return Bottom border position
@@ -671,7 +736,7 @@ public class GestureImageView extends ImageView {
 		mMatrix.getValues(values);
 		return (int)(values[Matrix.MTRANS_Y] + values[Matrix.MSCALE_Y]*mImgHeight);
 	}
-	
+
 	/**
 	 * Get the relative position of right border of the image after translated or zoomed, on X axis.
 	 * @return Right border position
@@ -681,7 +746,7 @@ public class GestureImageView extends ImageView {
 		mMatrix.getValues(values);
 		return (int)(values[Matrix.MTRANS_X] + values[Matrix.MSCALE_X]*mImgWidth);
 	}
-	
+
 	/**
 	 * Get the width of image after zoomed.
 	 * @return Width value
@@ -691,7 +756,7 @@ public class GestureImageView extends ImageView {
 		mMatrix.getValues(values);
 		return (int)(values[Matrix.MSCALE_X]*mImgWidth);
 	}
-	
+
 	/**
 	 * Get the height of image after zoomed.
 	 * @return height value
@@ -710,9 +775,52 @@ public class GestureImageView extends ImageView {
 			@Override
 			public void onAnimationUpdate(CompatAnimator animation) {
 				float scale = (Float) animation.getAnimatedValue();
-				mMatrix.postScale(scale/preValue, scale/preValue, centerX, centerY);
+				zoomProcess(scale / preValue, centerX, centerY);
 				setImageMatrix(mMatrix);
 				preValue = scale;
+			}
+
+			private void zoomProcess(float value, int pointX, int pointY) {
+				if (mCanDragOverLimit != OverlimitFlag.OVER) {
+					int tx = 0, ty = 0;
+					if (value > 1.0f) {
+						if (getImageTop() <= 0 - mExtendLimitTop && getImageBottom() < getHeight() + mExtendLimitBottom) {
+							ty = 0 - mExtendLimitTop - getImageTop();
+							pointY = 0 - mExtendLimitTop;
+						} else if (getImageBottom() >= getHeight() + mExtendLimitBottom && getImageTop() > 0 - mExtendLimitTop) {
+							ty = getHeight() + mExtendLimitBottom - getImageBottom();
+							pointY = getHeight() + mExtendLimitBottom;
+						}
+						if (getImageLeft() <= 0 - mExtendLimitLeft && getImageRight() < getWidth() + mExtendLimitRight) {
+							tx = 0 - mExtendLimitLeft - getImageLeft();
+							pointX = 0 - mExtendLimitLeft;
+						} else if (getImageRight() >= getWidth() + mExtendLimitRight && getImageLeft() > 0 - mExtendLimitLeft) {
+							tx = getWidth() + mExtendLimitRight - getImageRight();
+							pointX = getWidth() + mExtendLimitRight;
+						}
+					} else if (value < 1.0f) {
+						if (getImageTop() >= 0 - mExtendLimitTop && getImageBottom() > getHeight() + mExtendLimitBottom) {
+							ty = 0 - mExtendLimitTop - getImageTop();
+							pointY = 0 - mExtendLimitTop;
+						} else if (getImageBottom() <= getHeight() + mExtendLimitBottom && getImageTop() < 0 - mExtendLimitTop) {
+							ty = getHeight() + mExtendLimitBottom - getImageBottom();
+							pointY = getHeight() + mExtendLimitBottom;
+						}
+						if (getImageLeft() >= 0 - mExtendLimitLeft && getImageRight() > getWidth() + mExtendLimitRight) {
+							tx = 0 - mExtendLimitLeft - getImageLeft();
+							pointX = 0 - mExtendLimitLeft;
+						} else if (getImageRight() <= getWidth() + mExtendLimitRight && getImageLeft() < 0 - mExtendLimitLeft) {
+							tx = getWidth() + mExtendLimitRight - getImageRight();
+							pointX = getWidth() + mExtendLimitRight;
+						}
+					}
+					if (tx!=0 || ty!=0) {
+						mMatrix.postTranslate(tx, ty);
+					}
+				}
+
+				mMatrix.postScale(value, value, pointX, pointY);
+				mZoomListener.onZooming(byGesture, value, pointX, pointY);
 			}
 		});
 		if (shouldCallback) {
@@ -720,13 +828,13 @@ public class GestureImageView extends ImageView {
 				@Override
 				public void onAnimationEnd(CompatAnimator animation) {
 					float scale = (Float) animation.getAnimatedValue();
-					safeCallAfterZoom(byGesture, new PointF(centerX, centerY), scale);
+					callAfterZoom(byGesture, new PointF(centerX, centerY), scale);
 				}
 			});
 		}
 		mAnimator.start(this);
 	}
-	
+
 	private void dragAnimated(final boolean byGesture, final int dx, final int dy, boolean shouldCallback) {
 		mAnimator = CompatAnimator.ofFloat(0, 1);
 		mAnimator.setDuration(ANIMATE_DURATION);
@@ -736,6 +844,7 @@ public class GestureImageView extends ImageView {
 			public void onAnimationUpdate(CompatAnimator animation) {
 				float factor = (Float) animation.getAnimatedValue();
 				mMatrix.postTranslate((factor-preFactor)*dx, (factor-preFactor)*dy);
+				mDragListener.onDragging(byGesture, (int) (factor-preFactor)*dx, (int) (factor-preFactor)*dy);
 				setImageMatrix(mMatrix);
 				preFactor = factor;
 			}
@@ -745,48 +854,48 @@ public class GestureImageView extends ImageView {
 				@Override
 				public void onAnimationEnd(CompatAnimator animation) {
 					float factor = (Float) animation.getAnimatedValue();
-					safeCallAfterDrag(byGesture, (int)(factor*dx), (int)(factor*dy));
+					callAfterDrag(byGesture, (int) (factor * dx), (int) (factor * dy));
 				}
 			});
 		}
 		mAnimator.start(this);
 	}
-	
+
 	private int[] checkRealDistance(int dx, int dy) {
 		if (mCanDragOverLimit==OverlimitFlag.OVER) {
 			return new int[]{dx, dy};
 		}
 		int realX, realY;
-		if (getImageWidth() > getWidth()) {
+		if (getImageWidth() > getWidth() + mExtendLimitLeft + mExtendLimitRight) {
 			if (dx > 0) {
-				realX = Math.min(dx, 0 - getImageLeft());
+				realX = Math.min(dx, 0 - mExtendLimitLeft - getImageLeft());
 			} else {
-				realX = Math.max(dx, getWidth() - getImageRight());
+				realX = Math.max(dx, getWidth() + mExtendLimitRight - getImageRight());
 			}
 		} else {
 			if (dx > 0) {
-				realX = Math.min(dx, getWidth() - getImageRight());
+				realX = Math.min(dx, getWidth() + mExtendLimitRight - getImageRight());
 			} else {
-				realX = Math.max(dx, 0 - getImageLeft());
+				realX = Math.max(dx, 0 -mExtendLimitLeft - getImageLeft());
 			}
 		}
-		
-		if (getImageHeight() > getHeight()) {
+
+		if (getImageHeight() > getHeight() + mExtendLimitTop + mExtendLimitLeft) {
 			if (dy > 0) {
-				realY = Math.min(dy, 0 - getImageTop());
+				realY = Math.min(dy, 0 - mExtendLimitTop - getImageTop());
 			} else {
-				realY = Math.max(dy, getHeight() - getImageBottom());
+				realY = Math.max(dy, getHeight() + mExtendLimitBottom - getImageBottom());
 			}
 		} else {
 			if (dy > 0) {
-				realY = Math.min(dy, getHeight() - getImageBottom());
+				realY = Math.min(dy, getHeight() + mExtendLimitBottom - getImageBottom());
 			} else {
-				realY = Math.max(dy, 0 - getImageTop());
+				realY = Math.max(dy, 0 - mExtendLimitTop - getImageTop());
 			}
 		}
 		return new int[]{realX, realY};
 	}
-	
+
 	private float checkRealScale(float scale) {
 		if (mCanZoomOverLimit==OverlimitFlag.OVER) {
 			return scale;
@@ -801,99 +910,83 @@ public class GestureImageView extends ImageView {
 		}
 		return realScale;
 	}
-	
-	private void beforeDragByUser() {
-		if (mDragListener!=null) {
-			mDragListener.onDragStart(true);
-		}
-	}
-	
+
 	private void afterDragByUser(int movedX, int movedY) {
 		if (mCanDragOverLimit==OverlimitFlag.OVER) {
-			safeCallAfterDrag(true, movedX, movedY);
+			callAfterDrag(true, movedX, movedY);
 		} else if (mCanDragOverLimit==OverlimitFlag.SPRING_BACK) {
 			int fixX = 0, fixY = 0;
-			if (getImageWidth() > getWidth()) {
-				if (movedX > 0 && getImageLeft() > 0) {
-					fixX = 0 - getImageLeft();
-				} else if (movedX < 0 && getImageRight() < getWidth()) {
-					fixX = getWidth() - getImageRight();
+			if (getImageWidth() > getWidth() + mExtendLimitLeft + mExtendLimitRight) {
+				if (movedX > 0 && getImageLeft() > 0 - mExtendLimitLeft) {
+					fixX = 0 - mExtendLimitLeft - getImageLeft();
+				} else if (movedX < 0 && getImageRight() < getWidth() + mExtendLimitRight) {
+					fixX = getWidth() + mExtendLimitRight - getImageRight();
 				}
 			} else {
-				if (movedX > 0 && getImageRight() > getWidth()) {
-					fixX = getWidth() - getImageRight();
-				} else if (movedX < 0 && getImageLeft() < 0) {
-					fixX = 0 - getImageLeft();
+				if (movedX > 0 && getImageRight() > getWidth() + mExtendLimitRight) {
+					fixX = getWidth() + mExtendLimitRight - getImageRight();
+				} else if (movedX < 0 && getImageLeft() < 0 - mExtendLimitLeft) {
+					fixX = 0 - mExtendLimitLeft - getImageLeft();
 				}
 			}
-			
-			if (getImageHeight() > getHeight()) {
-				if (movedY > 0 && getImageTop() > 0) {
-					fixY = 0 - getImageTop();
-				} else if (movedY < 0 && getImageBottom() < getHeight()) {
-					fixY = getHeight() - getImageBottom();
+
+			if (getImageHeight() > getHeight() + mExtendLimitTop + mExtendLimitBottom) {
+				if (movedY > 0 && getImageTop() > 0 - mExtendLimitTop) {
+					fixY = 0 - mExtendLimitTop - getImageTop();
+				} else if (movedY < 0 && getImageBottom() < getHeight() + mExtendLimitBottom) {
+					fixY = getHeight() + mExtendLimitBottom - getImageBottom();
 				}
 			} else {
-				if (movedY > 0 && getImageBottom() > getHeight()) {
-					fixY = getHeight() - getImageBottom();
-				} else if (movedY < 0 && getImageTop() < 0) {
-					fixY = 0 - getImageTop();
+				if (movedY > 0 && getImageBottom() > getHeight() + mExtendLimitBottom) {
+					fixY = getHeight() + mExtendLimitBottom - getImageBottom();
+				} else if (movedY < 0 && getImageTop() < 0 - mExtendLimitTop) {
+					fixY = 0 - mExtendLimitTop - getImageTop();
 				}
 			}
-			safeCallAfterDrag(true, movedX+fixX, movedY+fixY);
-			
+			callAfterDrag(true, movedX + fixX, movedY + fixY);
+
 			if (fixX==0 && fixY==0) {
 				return;
 			}
 			privatePerformDrag(false, fixX, fixY, false);
 		} else if (mCanDragOverLimit==OverlimitFlag.UNABLE) {
-			safeCallAfterDrag(true, movedX, movedY);
+			callAfterDrag(true, movedX, movedY);
 		}
 	}
 
-	private void safeCallAfterDrag(boolean byGesture, int movedX, int movedY) {
-		if (mDragListener!=null) {
-			fitTranslate();
-			mDragListener.onDragEnd(byGesture, movedX, movedY);
-		}
+	private void callAfterDrag(boolean byGesture, int movedX, int movedY) {
+		fitTranslate();
+		mDragListener.onDragEnd(byGesture, movedX, movedY);
 	}
-	
-	private void beforeZoomByUser() {
-		if (mZoomListener!=null) {
-			mZoomListener.onZoomStart(true);
-		}
-	}
-	
+
 	private void afterZoomByUser(PointF center, float scaled) {
 		if (mCanZoomOverLimit==OverlimitFlag.OVER) {
-			safeCallAfterZoom(true, center, scaled);
+			callAfterZoom(true, center, scaled);
 		} else if (mCanZoomOverLimit==OverlimitFlag.SPRING_BACK) {
 			float fixScale = 1;
 			//OverLimited
 			if (mMinScale>0 && getImageScale()<mMinScale) {
 				fixScale = mMinScale/getImageScale();
 			}
-			if (mMaxScale>0 && getImageScale()>mMaxScale) { 
+			if (mMaxScale>0 && getImageScale()>mMaxScale) {
 				fixScale = mMaxScale/getImageScale();
 			}
-			safeCallAfterZoom(true, center, Math.round((scaled*fixScale)*1000)/1000);
-			
+			callAfterZoom(true, center, Math.round((scaled * fixScale) * 1000) / 1000);
+
 			if (fixScale==1f) {
 				return;
 			}
 			privatePerformZoom(false, fixScale, (int)center.x, (int)center.y, false);
 		} else if (mCanZoomOverLimit==OverlimitFlag.UNABLE) {
-			safeCallAfterZoom(true, center, scaled);
+			callAfterZoom(true, center, scaled);
 		}
 	}
-	
-	private void safeCallAfterZoom(boolean byGesture, PointF center, float scaled) {
-		if (mZoomListener!=null) {
-			fitTranslate();
-			mZoomListener.onZoomEnd(byGesture, scaled, (int)center.x, (int)center.y);
-		}
+
+	private void callAfterZoom(boolean byGesture, PointF center, float scaled) {
+		fitTranslate();
+		mZoomListener.onZoomEnd(byGesture, scaled, (int)center.x, (int)center.y);
 	}
-	
+
 	private void fitTranslate() {
 		float[] values = new float[9];
 		mMatrix.getValues(values);
@@ -902,7 +995,7 @@ public class GestureImageView extends ImageView {
 		mMatrix.setValues(values);
 		setImageMatrix(mMatrix);
 	}
-	
+
 	//Handle events that created by onTouch
 	//Initialize statement
 	private OnTouchGestureListener mOnTouchListener = new OnTouchGestureListener(getContext());
@@ -914,7 +1007,7 @@ public class GestureImageView extends ImageView {
 			int movedY = 0;
 			float overLimitDX = 0;	//record the distanceX after the drag reach limit
 			float overLimitDY = 0;	//record the distanceY after the drag reach limit
-			
+
 			@Override
 			public void onDown(PointF point) {
 				if (isDraggable()) {
@@ -934,8 +1027,8 @@ public class GestureImageView extends ImageView {
 				if (!isDraggable()) {
 					return;
 				}
-				if (moved == false) {
-					beforeDragByUser();
+				if (!moved) {
+					mDragListener.onDragStart(true);
 				}
 				moved = true;
 				int dx = (int)-dxF;
@@ -966,6 +1059,7 @@ public class GestureImageView extends ImageView {
 				movedX += realDx;
 				movedY += realDy;
 				mMatrix.postTranslate(realDx, realDy);
+				mDragListener.onDragging(true, realDx, realDy);
 				setImageMatrix(mMatrix);
 			}
 
@@ -1001,38 +1095,44 @@ public class GestureImageView extends ImageView {
 			public void onLongClick(PointF point) {
 				if (isLongClickable()) {
 					performLongClick();
-				}				
+				}
 			}
 
 			@Override
 			public void onFling(PointF from, PointF to, float vx, float vy) {
-				if (getImageWidth() > getWidth()) {
-					if (vx > 0 && getImageLeft() > 0) {
-						return;
-					} else if (vx < 0 && getImageRight() < getWidth()) {
-						return;
+				if (!isDraggable()) {
+					return;
+				}
+				if (mCanDragOverLimit!=OverlimitFlag.OVER) {
+					if (getImageWidth() > getWidth() + mExtendLimitLeft + mExtendLimitRight) {
+						if (vx > 0 && getImageLeft() > 0 - mExtendLimitLeft) {
+							return;
+						} else if (vx < 0 && getImageRight() < getWidth() + mExtendLimitRight) {
+							return;
+						}
+					} else {
+						if (vx > 0 && getImageRight() > getWidth() + mExtendLimitRight) {
+							return;
+						} else if (vx < 0 && getImageLeft() < 0 - mExtendLimitLeft) {
+							return;
+						}
 					}
-				} else {
-					if (vx > 0 && getImageRight() > getWidth()) {
-						return;
-					} else if (vx < 0 && getImageLeft() < 0) {
-						return;
+
+					if (getImageHeight() > getHeight() + mExtendLimitTop + mExtendLimitRight) {
+						if (vy > 0 && getImageTop() > 0 - mExtendLimitTop) {
+							return;
+						} else if (vy < 0 && getImageBottom() < getHeight() + mExtendLimitBottom) {
+							return;
+						}
+					} else {
+						if (vy > 0 && getImageBottom() > getHeight() + mExtendLimitBottom) {
+							return;
+						} else if (vy < 0 && getImageTop() < 0 - mExtendLimitTop) {
+							return;
+						}
 					}
 				}
-				
-				if (getImageHeight() > getHeight()) {
-					if (vy > 0 && getImageTop() > 0) {
-						return;
-					} else if (vy < 0 && getImageBottom() < getHeight()) {
-						return;
-					}
-				} else {
-					if (vy > 0 && getImageBottom() > getHeight()) {
-						return;
-					} else if (vy < 0 && getImageTop() < 0) {
-						return;
-					}
-				}
+
 				int movedX = 0, movedY = 0;
 				if (mFling!=null) {
 					mFling.cancel();
@@ -1054,7 +1154,7 @@ public class GestureImageView extends ImageView {
 			boolean moved = false;	//if called onDblMove in once, it is set to true
 			float scaled = 1f;		//record the total scale in one dbl-move event
 			float overLimitDY = 0;	//record the distanceY after the scale reach limit
-			
+
 			@Override
 			public void onDblDown(PointF point) {
 				center = point;
@@ -1062,14 +1162,14 @@ public class GestureImageView extends ImageView {
 				scaled = 1f;
 				overLimitDY = 0;
 			}
-			
+
 			@Override
 			public void onDblMove(PointF from, PointF to, float dx, float dy) {
 				if (!isZoomable()) {
 					return;
 				}
-				if (moved == false) {
-					beforeZoomByUser();
+				if (!moved) {
+					mZoomListener.onZoomStart(true);
 				}
 				moved = true;
 				float scale = (float) Math.pow(2, -dy/SLIDE_ZOOM_WEIGHT);
@@ -1085,21 +1185,63 @@ public class GestureImageView extends ImageView {
 					}
 				}
 				scaled *= realScale;
-				mMatrix.postScale(realScale, realScale, center.x, center.y);
+
+				float centerX = center.x, centerY = center.y;
+				if (mCanDragOverLimit != OverlimitFlag.OVER) {
+					int tx = 0, ty = 0;
+					if (realScale > 1.0f) {
+						if (getImageTop() <= 0 - mExtendLimitTop && getImageBottom() < getHeight() + mExtendLimitBottom) {
+							ty = 0 - mExtendLimitTop - getImageTop();
+							centerY = 0 - mExtendLimitTop;
+						} else if (getImageBottom() >= getHeight() + mExtendLimitBottom && getImageTop() > 0 - mExtendLimitTop) {
+							ty = getHeight() + mExtendLimitBottom - getImageBottom();
+							centerY = getHeight() + mExtendLimitBottom;
+						}
+						if (getImageLeft() <= 0 - mExtendLimitLeft && getImageRight() < getWidth() + mExtendLimitRight) {
+							tx = 0 - mExtendLimitLeft - getImageLeft();
+							centerX = 0 - mExtendLimitLeft;
+						} else if (getImageRight() >= getWidth() + mExtendLimitRight && getImageLeft() > 0 - mExtendLimitLeft) {
+							tx = getWidth() + mExtendLimitRight - getImageRight();
+							centerX = getWidth() + mExtendLimitRight;
+						}
+					} else if (realScale < 1.0f) {
+						if (getImageTop() >= 0 - mExtendLimitTop && getImageBottom() > getHeight() + mExtendLimitBottom) {
+							ty = 0 - mExtendLimitTop - getImageTop();
+							centerY = 0 - mExtendLimitTop;
+						} else if (getImageBottom() <= getHeight() + mExtendLimitBottom && getImageTop() < 0 - mExtendLimitTop) {
+							ty = getHeight() + mExtendLimitBottom - getImageBottom();
+							centerY = getHeight() + mExtendLimitBottom;
+						}
+						if (getImageLeft() >= 0 - mExtendLimitLeft && getImageRight() > getWidth() + mExtendLimitRight) {
+							tx = 0 - mExtendLimitLeft - getImageLeft();
+							centerX = 0 - mExtendLimitLeft;
+						} else if (getImageRight() <= getWidth() + mExtendLimitRight && getImageLeft() < 0 - mExtendLimitLeft) {
+							tx = getWidth() + mExtendLimitRight - getImageRight();
+							centerX = getWidth() + mExtendLimitRight;
+						}
+					}
+					if (tx!=0 || ty!=0) {
+						mMatrix.postTranslate(tx, ty);
+						Log.i(TAG, "tx-ty-Top: " + tx + "-" + ty + "-" + getImageTop());
+					}
+				}
+
+				mMatrix.postScale(realScale, realScale, centerX, centerY);
+				mZoomListener.onZooming(true, realScale, (int) centerX, (int) centerY);
 				setImageMatrix(mMatrix);
 			}
-			
+
 			@Override
 			public void onDblUp(PointF point) {
 				if (moved && isZoomable()) {
 					afterZoomByUser(center, scaled);
 				}
 			}
-			
+
 			@Override
 			public void onDblClick(PointF point) {
 				if (isQuickZoomable() && isZoomable()) {
-					beforeZoomByUser();
+					mZoomListener.onZoomStart(true);
 					privatePerformZoom(true, DEFAULT_ZOOM_SCALE, (int)point.x, (int)point.y, true);
 				}
 				if (isDoubleClickable()) {
@@ -1125,33 +1267,33 @@ public class GestureImageView extends ImageView {
 				scaled = 1f;
 				overLimitDis = 0;
 			}
-			
+
 			@Override
 			public void onMultiClick(PointF p0, PointF p1) {
 				if (isQuickZoomable() && isZoomable()) {
-					beforeZoomByUser();
+					mZoomListener.onZoomStart(true);
 					privatePerformZoom(true, 1f/DEFAULT_ZOOM_SCALE, (int)center.x, (int)center.y, true);
 				}
 			}
-			
+
 			@Override
 			public void onMultiLongClick(PointF p0, PointF p1) {
 			}
-			
+
 			@Override
 			public void onMultiUp(PointF p0, PointF p1) {
 				if (moved && isZoomable()) {
 					afterZoomByUser(center, scaled);
 				}
 			}
-			
+
 			@Override
 			public void onMultiMove(PointF oldPoint0, PointF oldPoint1, PointF newPoint0, PointF newPoint1) {
 				if (!isZoomable()) {
 					return;
 				}
-				if (moved == false) {
-					beforeZoomByUser();
+				if (!moved) {
+					mZoomListener.onZoomStart(true);
 				}
 				moved = true;
 				float distance = OnTouchGestureListener.Util.distance(newPoint0, newPoint1) - OnTouchGestureListener.Util.distance(oldPoint0, oldPoint1);
@@ -1168,47 +1310,88 @@ public class GestureImageView extends ImageView {
 					}
 				}
 				scaled *= realScale;
-				mMatrix.postScale(realScale, realScale, center.x, center.y);
+
+				float centerX = center.x, centerY = center.y;
+				if (mCanDragOverLimit != OverlimitFlag.OVER) {
+					int tx = 0, ty = 0;
+					if (realScale > 1.0f) {
+						if (getImageTop() <= 0 - mExtendLimitTop && getImageBottom() < getHeight() + mExtendLimitBottom) {
+							ty = 0 - mExtendLimitTop - getImageTop();
+							centerY = 0 - mExtendLimitTop;
+						} else if (getImageBottom() >= getHeight() + mExtendLimitBottom && getImageTop() > 0 - mExtendLimitTop) {
+							ty = getHeight() + mExtendLimitBottom - getImageBottom();
+							centerY = getHeight() + mExtendLimitBottom;
+						}
+						if (getImageLeft() <= 0 - mExtendLimitLeft && getImageRight() < getWidth() + mExtendLimitRight) {
+							tx = 0 - mExtendLimitLeft - getImageLeft();
+							centerX = 0 - mExtendLimitLeft;
+						} else if (getImageRight() >= getWidth() + mExtendLimitRight && getImageLeft() > 0 - mExtendLimitLeft) {
+							tx = getWidth() + mExtendLimitRight - getImageRight();
+							centerX = getWidth() + mExtendLimitRight;
+						}
+					} else if (realScale < 1.0f) {
+						if (getImageTop() >= 0 - mExtendLimitTop && getImageBottom() > getHeight() + mExtendLimitBottom) {
+							ty = 0 - mExtendLimitTop - getImageTop();
+							centerY = 0 - mExtendLimitTop;
+						} else if (getImageBottom() <= getHeight() + mExtendLimitBottom && getImageTop() < 0 - mExtendLimitTop) {
+							ty = getHeight() + mExtendLimitBottom - getImageBottom();
+							centerY = getHeight() + mExtendLimitBottom;
+						}
+						if (getImageLeft() >= 0 - mExtendLimitLeft && getImageRight() > getWidth() + mExtendLimitRight) {
+							tx = 0 - mExtendLimitLeft - getImageLeft();
+							centerX = 0 - mExtendLimitLeft;
+						} else if (getImageRight() <= getWidth() + mExtendLimitRight && getImageLeft() < 0 - mExtendLimitLeft) {
+							tx = getWidth() + mExtendLimitRight - getImageRight();
+							centerX = getWidth() + mExtendLimitRight;
+						}
+					}
+					if (tx!=0 || ty!=0) {
+						mMatrix.postTranslate(tx, ty);
+					}
+				}
+
+				mMatrix.postScale(realScale, realScale, centerX, centerY);
+				mZoomListener.onZooming(true, realScale, (int) centerX, (int) centerY);
 				setImageMatrix(mMatrix);
 			}
 		});
 	}
-	
+
 	private Fling mFling;
 	private class Fling implements Runnable {
 		CompatScroller scroller;
 		int currX, currY;
 		int prevMovedX, prevMovedY;
-		
+
 		Fling(int vx, int vy, int movedX, int movedY) {
 			float[] values = new float[9];
 			scroller = new CompatScroller(getContext());
 			mMatrix.getValues(values);
-			
+
 			int startX = (int) values[Matrix.MTRANS_X];
 			int startY = (int) values[Matrix.MTRANS_Y];
 			int minX, maxX, minY, maxY;
-			
+
 			if (canDragOverLimit()) {
-				minX = getImageLeft() - 2 * getWidth();
-				maxX = getImageLeft() + 2 * getWidth();
-				minY = getImageTop() - 2 * getHeight();
-				maxY = getImageTop() + 2 * getHeight();
+				minX = Integer.MIN_VALUE;
+				maxX = Integer.MAX_VALUE;
+				minY = Integer.MIN_VALUE;
+				maxY = Integer.MAX_VALUE;
 			} else {
-				if (getImageWidth() > getWidth()) {
-					maxX = 0;
-					minX = getWidth() - getImageWidth();
+				if (getImageWidth() > getWidth() + mExtendLimitLeft + mExtendLimitRight) {
+					maxX = 0 - mExtendLimitLeft;
+					minX = getWidth() + mExtendLimitRight - getImageWidth();
 				} else {
-					minX = 0;
-					maxX = getWidth() - getImageWidth();
+					minX = 0 - mExtendLimitLeft;
+					maxX = getWidth() + mExtendLimitRight - getImageWidth();
 				}
-				
-				if (getImageHeight() > getHeight()) {
-					maxY = 0;
-					minY = getHeight() - getImageHeight();
+
+				if (getImageHeight() > getHeight() + mExtendLimitTop + mExtendLimitBottom) {
+					maxY = 0 - mExtendLimitTop;
+					minY = getHeight() + mExtendLimitBottom - getImageHeight();
 				} else {
-					minY = 0;
-					maxY = getHeight() - getImageHeight();
+					minY = 0 - mExtendLimitTop;
+					maxY = getHeight() + mExtendLimitBottom - getImageHeight();
 				}
 			}
 			scroller.fling(startX, startY, vx, vy, minX, maxX, minY, maxY);
@@ -1217,13 +1400,13 @@ public class GestureImageView extends ImageView {
 			prevMovedX = movedX;
 			prevMovedY = movedY;
 		}
-		
+
 		void cancel() {
 			if (scroller != null) {
 				scroller.forceFinished(true);
 			}
 		}
-		
+
 		@Override
 		public void run() {
 			if (scroller.isFinished()) {
@@ -1235,6 +1418,7 @@ public class GestureImageView extends ImageView {
 				int newX = scroller.getCurrX();
 				int newY = scroller.getCurrY();
 				mMatrix.postTranslate(newX-currX, newY-currY);
+				mDragListener.onDragging(true, newX-currX, newY-currY);
 				setImageMatrix(mMatrix);
 				currX = newX;
 				currY = newY;
@@ -1244,12 +1428,12 @@ public class GestureImageView extends ImageView {
 				scroller = null;
 			}
 		}
-		
+
 		private void callAfterFling() {
 			afterDragByUser(prevMovedX + scroller.getDistanceX(), prevMovedY + scroller.getDistanceY());
 		}
 	}
-	
+
 	//Scroller or OverScroller
 	@TargetApi(VERSION_CODES.GINGERBREAD)
 	private static class CompatScroller {
@@ -1257,7 +1441,7 @@ public class GestureImageView extends ImageView {
 		OverScroller overScroller;
 		boolean isAdvancedApi;
 		int startX, startY;
-		
+
 		CompatScroller(Context context) {
 			if (VERSION.SDK_INT >= VERSION_CODES.GINGERBREAD) {
 				isAdvancedApi = true;
@@ -1267,7 +1451,7 @@ public class GestureImageView extends ImageView {
 				scroller = new Scroller(context);
 			}
 		}
-		
+
 		void fling(int startX, int startY, int velocityX, int velocityY, int minX, int maxX, int minY, int maxY) {
 			if (isAdvancedApi) {
 				overScroller.fling(startX, startY, velocityX, velocityY, minX, maxX, minY, maxY);
@@ -1277,7 +1461,7 @@ public class GestureImageView extends ImageView {
 			this.startX = startX;
 			this.startY = startY;
 		}
-		
+
 		boolean isFinished() {
 			if (isAdvancedApi) {
 				return overScroller.isFinished();
@@ -1285,7 +1469,7 @@ public class GestureImageView extends ImageView {
 				return scroller.isFinished();
 			}
 		}
-		
+
 		void forceFinished(boolean finished) {
 			if (isAdvancedApi) {
 				overScroller.forceFinished(finished);
@@ -1293,7 +1477,7 @@ public class GestureImageView extends ImageView {
 				scroller.forceFinished(finished);
 			}
 		}
-		
+
 		boolean computeScrollOffset() {
 			if (isAdvancedApi) {
 				return overScroller.computeScrollOffset();
@@ -1301,7 +1485,7 @@ public class GestureImageView extends ImageView {
 				return scroller.computeScrollOffset();
 			}
 		}
-		
+
 		int getCurrX() {
 			if (isAdvancedApi) {
 				return overScroller.getCurrX();
@@ -1309,7 +1493,7 @@ public class GestureImageView extends ImageView {
 				return scroller.getCurrX();
 			}
 		}
-		
+
 		int getCurrY() {
 			if (isAdvancedApi) {
 				return overScroller.getCurrY();
@@ -1321,12 +1505,12 @@ public class GestureImageView extends ImageView {
 		int getDistanceX() {
 			return getCurrX() - startX;
 		}
-		
+
 		int getDistanceY() {
 			return getCurrY() - startY;
 		}
 	}
-	
+
 	@TargetApi(VERSION_CODES.JELLY_BEAN)
 	private void compatPostOnAnimation(Runnable runnable) {
 		if (VERSION.SDK_INT >= VERSION_CODES.JELLY_BEAN) {
@@ -1335,7 +1519,7 @@ public class GestureImageView extends ImageView {
 			postDelayed(runnable, 1000/60);
 		}
 	}
-	
+
 	private CompatAnimator mAnimator;
 	static class CompatAnimator implements Runnable {
 		private final long FRAME_DURATION = 1000/60;
@@ -1345,30 +1529,30 @@ public class GestureImageView extends ImageView {
 		private float end;
 		private float animatedValue;
 		private State state = State.STOP;
-		
+
 		private AnimatorUpdateListener updateListener;
 		private AnimatorListener endListener;
 		private long remainTime;
-		
-		public enum State {STOP, RUNNING, FINISHED, CANCELLED};
-		
+
+		public enum State {STOP, RUNNING, FINISHED, CANCELLED}
+
 		public interface AnimatorUpdateListener {
-			public void onAnimationUpdate(CompatAnimator animation);
+			void onAnimationUpdate(CompatAnimator animation);
 		}
-		
+
 		public interface AnimatorListener {
-			public void onAnimationEnd(CompatAnimator animation);
+			void onAnimationEnd(CompatAnimator animation);
 		}
-		
+
 		public static CompatAnimator ofFloat(float start, float end) {
 			return new CompatAnimator(start, end);
 		}
-		
+
 		private CompatAnimator(float start, float end) {
 			this.start = start;
 			this.end = end;
 		}
-		
+
 		public void setDuration(long duration) {
 			if (duration<0) {
 				duration = -duration;
@@ -1376,50 +1560,50 @@ public class GestureImageView extends ImageView {
 			this.duration = duration;
 			this.remainTime = duration;
 		}
-		
+
 		public long getDuration() {
 			return this.duration;
 		}
-		
+
 		public boolean isRunning() {
 			return this.state == State.RUNNING;
 		}
-		
+
 		public boolean isStarted() {
 			return this.state != State.STOP;
 		}
-		
+
 		public void addUpdateListener(AnimatorUpdateListener listener) {
 			this.updateListener = listener;
 		}
-		
+
 		public void addListener(AnimatorListener listener) {
 			this.endListener = listener;
 		}
-		
+
 		public void start(View contextView) {
 			animatedValue = start;
 			this.contextView = contextView;
 			state = State.RUNNING;
 			contextView.postDelayed(this, FRAME_DURATION);
 		}
-		
+
 		public void cancel() {
 			if (state == State.RUNNING) {
 				state = State.CANCELLED;
 			}
 		}
-		
+
 		public void end() {
 			if (state == State.RUNNING) {
 				state = State.FINISHED;
 			}
 		}
-		
+
 		public Object getAnimatedValue() {
-			return Float.valueOf(animatedValue);
+			return animatedValue;
 		}
-		
+
 		@Override
 		public void run() {
 			if (state == State.RUNNING) {
@@ -1434,30 +1618,30 @@ public class GestureImageView extends ImageView {
 			} else if (state == State.STOP) {
 				remainTime = 0;
 			}
-			
+
 			if (updateListener!=null) {
 				updateListener.onAnimationUpdate(this);
 			}
-			
+
 			if (state != State.RUNNING) {
 				if (endListener!=null) {
 					endListener.onAnimationEnd(this);
 				}
 				return;
 			}
-			
+
 			//Last step to finish
 			if (remainTime <= FRAME_DURATION) {
 				state = State.FINISHED;
 			}
-			
+
 			if (remainTime < 0) {
 				remainTime = 0;
 			}
-			
+
 			contextView.postDelayed(this, remainTime>=FRAME_DURATION? FRAME_DURATION: remainTime);
 		}
-		
+
 		private float animatorValueAt(long t) {
 			float dd = duration*duration;
 			float a = (start-end)/dd;
@@ -1466,4 +1650,32 @@ public class GestureImageView extends ImageView {
 			return a * x + c;
 		}
 	}
+
+	private static OnZoomListener emptyZoomListener = new OnZoomListener() {
+		@Override
+		public void onZoomStart(boolean byGesture) {
+		}
+
+		@Override
+		public void onZooming(boolean byGesture, float step, int centerX, int centerY) {
+		}
+
+		@Override
+		public void onZoomEnd(boolean byGesture, float scale, int centerX, int centerY) {
+		}
+	};
+
+	private static OnDragListener emptyDragListener = new OnDragListener() {
+		@Override
+		public void onDragStart(boolean byGesture) {
+		}
+
+		@Override
+		public void onDragging(boolean byGesture, int stepX, int stepY) {
+		}
+
+		@Override
+		public void onDragEnd(boolean byGesture, int dx, int dy) {
+		}
+	};
 }
